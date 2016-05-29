@@ -1,0 +1,213 @@
+---
+- name: install software required for compilation
+  apt: pkg={{item}} state=installed
+  become: 'yes'
+  become_method: sudo
+  with_items:
+    - build-essential
+    - checkinstall
+
+- name: create www-data group
+  become: 'yes'
+  become_method: sudo
+  group: name=www-data state=present system=yes
+
+- name: create nginx user
+  become: 'yes'
+  become_method: sudo
+  user: 
+    name: nginx
+    createhome: no
+    group: www-data
+    shell: /sbin/nologin
+    system: yes
+    state: present
+
+- name: get zlib source
+  get_url: 
+    url: "http://zlib.net/zlib-{{ zlib_version }}.tar.gz" 
+    dest: "{{ working_dir }}/zlib-{{ zlib_version }}.tar.gz"
+    mode: 0440
+    checksum: "{{ zlib_checksum }}"
+
+- name: extract zlib sources
+  unarchive: 
+    src: "{{ working_dir }}/zlib-{{ zlib_version }}.tar.gz" 
+    dest: "{{ working_dir }}"
+    copy: no
+    creates: "{{ working_dir }}/zlib-{{ zlib_version }}"
+
+- name: get pcre source
+  get_url:
+    url: http://exim.mirror.fr/pcre/pcre-{{ pcre_version }}.tar.bz2
+    dest: "{{ working_dir }}/pcre-{{ pcre_version }}.tar.bz2"
+    mode: 0440
+    checksum: "{{ pcre_checksum }}"
+
+- name: extract pcre sources
+  unarchive: 
+    src: "{{ working_dir }}/pcre-{{ pcre_version }}.tar.bz2" 
+    dest: "{{ working_dir }}"
+    copy: no
+    creates: "{{ working_dir }}/pcre-{{ pcre_version }}"
+
+- name: get openssl source
+  get_url: 
+    url: "https://www.openssl.org/source/openssl-{{ openssl_version }}.tar.gz" 
+    dest: "{{ working_dir }}/openssl-{{ openssl_version }}.tar.gz"
+    mode: 0440
+    checksum: "{{ openssl_checksum }}"
+
+- name: extract openssl sources
+  unarchive: 
+    src: "{{ working_dir }}/openssl-{{ openssl_version }}.tar.gz" 
+    dest: "{{ working_dir }}"
+    copy: no
+    creates: "{{ working_dir }}/openssl-{{ openssl_version }}"
+
+- name: get headers-more-nginx-module source
+  get_url: 
+    url: "https://github.com/openresty/headers-more-nginx-module/archive/v{{ headers_more_nginx_module_version }}.tar.gz" 
+    dest: "{{ working_dir }}/headers-more-nginx-module-{{ headers_more_nginx_module_version }}.tar.gz"
+    mode: 0440
+    checksum: "{{ headers_more_nginx_module_checksum }}"
+
+- name: extract headers-more-nginx-module sources
+  unarchive: 
+    src: "{{ working_dir }}/headers-more-nginx-module-{{ headers_more_nginx_module_version }}.tar.gz" 
+    dest: "{{ working_dir }}"
+    copy: no
+    creates: "{{ working_dir }}/headers-more-nginx-module-{{ headers_more_nginx_module_version }}"
+
+- name: get nginx source
+  get_url: 
+    url: "http://nginx.org/download/nginx-{{ nginx_version }}.tar.gz" 
+    dest: "{{ working_dir }}/nginx-{{ nginx_version }}.tar.gz"
+    mode: 0440
+    checksum: "{{ nginx_checksum }}"
+
+- name: extract nginx sources
+  become: 'yes'
+  become_method: sudo
+  unarchive: 
+    src: "{{ working_dir }}/nginx-{{ nginx_version }}.tar.gz" 
+    dest: "{{ working_dir }}"
+    copy: no
+    creates: "{{ working_dir }}/zlib-{{ nginx_version }}"
+
+- name: configure nginx
+  become: 'yes'
+  become_method: sudo
+  shell: >
+    ./configure \
+      --prefix=/usr/local/nginx \
+      --conf-path=/etc/nginx/nginx.conf \
+      --http-log-path=/var/log/nginx/http.log \
+      --error-log-path=/var/log/nginx/error.log \
+      --user=nginx \
+      --group=www-data \
+      --with-ld-opt="-static" \
+      --with-cc-opt="-O2 -static -static-libgcc" \
+      --with-openssl="{{ working_dir }}/openssl-{{ openssl_version }}" \
+      --with-pcre={{ working_dir }}/pcre-{{ pcre_version }} \
+      --with-zlib={{ working_dir }}/zlib-{{ zlib_version }} \
+      --add-module={{ working_dir }}/headers-more-nginx-module-{{ headers_more_nginx_module_version }} \
+      --with-http_ssl_module \
+      --with-stream \
+      --with-ipv6 \
+      --with-http_v2_module \
+      --without-http_autoindex_module \
+      --without-http_proxy_module \
+      --without-mail_pop3_module \
+      --without-mail_imap_module \
+      --without-mail_smtp_module \
+      --pid-path=/run/nginx.pid
+  args:
+    chdir: "{{ working_dir }}/nginx-{{ nginx_version }}"
+
+- name: compile nginx
+  become: 'yes'
+  become_method: sudo
+  shell: make 
+  args:
+    chdir: "{{ working_dir }}/nginx-{{ nginx_version }}"
+    creates: "{{ working_dir }}/nginx-{{ nginx_version }}/objs/nginx"
+
+- name: install nginx package
+  become: 'yes'
+  become_method: sudo
+  shell: checkinstall --default 
+  args:
+    chdir: "{{ working_dir }}/nginx-{{ nginx_version }}"
+    creates: /etc/nginx/nginx.conf
+
+- name: create /srv/www
+  become: 'yes'
+  become_method: sudo
+  file: 
+    path: /srv/www
+    state: directory 
+    mode: 0775
+    owner: nginx
+    group: www-data
+
+- name: setup /var/www symlink
+  become: 'yes'
+  become_method: sudo
+  file: 
+    path: /var/www 
+    src: /srv/www
+    state: link
+    mode: 0774
+    owner: nginx
+    group: www-data
+
+
+- name: create /etc/nginx/sites-enabled
+  become: 'yes'
+  become_method: sudo
+  file: 
+    path: /etc/nginx/sites-enabled
+    state: directory 
+    mode: 0775
+    owner: nginx
+    group: www-data
+# - name: setup nginx sites-available symlink
+#   file: path=/etc/nginx/sites-available 
+#         src=/srv/www/sites-available
+#         state=link
+#         force=yes
+
+- name: configure nginx service
+  become: 'yes'
+  become_method: sudo
+  copy: 
+    src: files/nginx.service
+    dest: /lib/systemd/system/nginx.service
+    mode: "u=rw,g=r,o=r"
+  notify:
+    - reload systemd
+
+- name: set default nginx config
+  become: 'yes'
+  become_method: sudo
+  copy: 
+    src: files/nginx.conf
+    dest: /etc/nginx/nginx.conf
+    mode: "u=rw,g=r,o=r"
+
+- file:
+    path: "{{ working_dir }}/{{ item.src }}"
+    state: absent
+  with_items:
+    - { src: '{{ working_dir }}/nginx-{{ nginx_version }}' }
+    - { src: '{{ working_dir }}/nginx-{{ nginx_version }}.tar.gz' }
+    - { src: '{{ working_dir }}/pcre-{{ pcre_version }}' }
+    - { src: '{{ working_dir }}/pcre-{{ pcre_version }}.tar.bz2' }
+    - { src: '{{ working_dir }}/zlib-{{ zlib_version }}' }
+    - { src: '{{ working_dir }}/zlib-{{ zlib_version }}.tar.gz' }
+    - { src: '{{ working_dir }}/openssl-{{ openssl_version }}' }
+    - { src: '{{ working_dir }}/openssl-{{ openssl_version }}.tar.gz' }
+    - { src: '{{ working_dir }}/headers-more-nginx-module-{{ headers_more_nginx_module_version }}' }
+    - { src: '{{ working_dir }}/headers-more-nginx-module-{{ headers_more_nginx_module_version }}.tar.gz' }
+

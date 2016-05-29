@@ -1,0 +1,31 @@
+---
+- name: Check if nginx is installed
+  command: dpkg-query -l nginx
+  register: nginx_is_missing
+  failed_when: nginx_is_missing.rc > 1
+  changed_when: no
+
+- include: nginx.yml
+  vars:
+    working_dir: /tmp
+    nginx_version: 1.10.0
+    nginx_checksum: sha1:7a452cfe37e4134481442dbfa3fbdac6f484c5bc
+    zlib_version: 1.2.8
+    zlib_checksum: md5:44d667c142d7cda120332623eab69f40
+    openssl_version: 1.0.2h
+    openssl_checksum: sha1:577585f5f5d299c44dd3c993d3c0ac7a219e4949
+    pcre_version: "8.38"
+    pcre_checksum: md5:00aabbfe56d5a48b270f999b508c5ad2
+    headers_more_nginx_module_version: "0.30"
+    headers_more_nginx_module_checksum: sha1:a188a399f3e365a0831585a9d7aa0e6ed1a75f0d
+  when: nginx_is_missing.rc == 1
+
+- name: Allow http traffic
+  ufw: rule=allow port=80 proto=tcp
+  become: 'yes'
+  become_method: sudo
+
+- name: Allow https traffic
+  ufw: rule=allow port=443 proto=tcp
+  become: 'yes'
+  become_method: sudo
